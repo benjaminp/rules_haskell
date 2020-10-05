@@ -1256,24 +1256,27 @@ def _pin_packages(repository_ctx, resolved):
             # directory or underneath a top-level directory.
             root = repository_ctx.path("{name}-{version}".format(**spec))
             cabal_file = "{name}.cabal".format(**spec)
-            if root.get_child(cabal_file).exists:
-                stripPrefix = ""
-            else:
-                subdirs = [
-                    subdir
-                    for subdir in root.readdir()
-                    if subdir.get_child(cabal_file).exists
-                ]
-                if len(subdirs) != 1:
-                    fail("Unsupported archive format at {url}: Expected {cabal} in the root or underneath a top-level directory".format(
-                        url = spec["location"]["url"],
-                        cabal = cabal_file,
-                    ))
-                stripPrefix = subdirs[0].basename
+            subdirs = _execute_or_fail_loudly(repository_ctx, [
+                "python",
+                "-c",
+                ";".join([
+                    "import os, sys",
+                    "root = sys.argv[1]",
+                    "cabal = sys.argv[2]",
+                    "[sys.stdout.write(os.path.relpath(prefix, root)) for prefix, _, files in os.walk(root) if cabal in files]",
+                ]),
+                root,
+                cabal_file,
+            ]).stdout.splitlines()
+            if len(subdirs) != 1:
+                fail("Unsupported archive format at {url}: Could not find {cabal} in the archive.".format(
+                    url = spec["location"]["url"],
+                    cabal = cabal_file,
+                ))
 
             spec["pinned"] = {
                 "sha256": sha256,
-                "strip-prefix": stripPrefix,
+                "strip-prefix": subdirs[0],
             }
         elif spec["location"]["type"] in ["git", "hg"]:
             # Bazel cannot cache git (or hg) repositories in the repository
